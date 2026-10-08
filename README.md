@@ -51,14 +51,19 @@ Shortly after deploy make sure everything is running
 
 ## Script usage
 
-Edit script content and select what type of appointments you actually need:
+### Current appointment search API
 
-    appointments = get_termins(DMV, 'FS Umschreibung Ausländischer FS')
-    # appointments = get_termins(CityHall, 'An- oder Ummeldung - Einzelperson')
-    # appointments = get_termins(ForeignLabor, 'Niederlassungserlaubnis Blaue Karte EU')
+The Munich appointment search uses the current public appointment API. Search for a service by its full or partial
+name from the project directory:
 
-Run the script
+    python3 appointment_api.py "Entwässerungsplanvorbesprechung - Vor Ort"
 
-    python3 termin_api.py
+The default search window is 180 days. It can be changed with `--start YYYY-MM-DD` and `--end YYYY-MM-DD`.
+If a search phrase matches multiple services, the command prints their exact names; run it again with the
+service name you want. Results are availability only; booking remains on Munich's official site.
 
-Output will be printed in the console
+The client uses Python's standard HTTP library. Install `tzdata` on Windows so appointment times are converted
+using Munich's daylight-saving rules; Linux systems generally provide this time-zone database already.
+
+The legacy bot interface in `termin_api.py` now adapts the new catalog and availability API to the result format
+used by the existing notification code.

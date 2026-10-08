@@ -1,5 +1,6 @@
 # Main dependencies for the script
 requests
+tzdata
 apscheduler
 elasticsearch < 8.0.0
 SQLAlchemy
