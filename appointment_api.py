@@ -68,7 +68,17 @@ class MunichAppointmentClient:
         try:
             with self.opener(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8"))
+                message = error_payload.get("errors", [{}])[0].get("errorMessage")
+            except (ValueError, AttributeError, IndexError, TypeError):
+                message = None
+            detail = f": {message}" if message else ""
+            raise AppointmentApiError(
+                f"Munich appointment API returned HTTP {exc.code}{detail}"
+            ) from exc
+        except (URLError, TimeoutError, OSError, ValueError) as exc:
             raise AppointmentApiError(f"Munich appointment API request failed: {exc}") from exc
 
         if not isinstance(payload, dict):
@@ -142,6 +152,7 @@ class MunichAppointmentClient:
         start_date: dt.date | None = None,
         end_date: dt.date | None = None,
         office_ids: list[str] | None = None,
+        captcha_token: str | None = None,
     ) -> list[AppointmentSlot]:
         if isinstance(service, int):
             matches = [item for item in self.find_services("") if item.id == service]
@@ -162,16 +173,16 @@ class MunichAppointmentClient:
             return []
 
         offices_by_id = {str(office["id"]): office for office in offices}
-        payload = self._get_json(
-            "available-calendar/",
-            params={
-                "startDate": start_date.isoformat(),
-                "endDate": end_date.isoformat(),
-                "officeIds": ",".join(offices_by_id),
-                "serviceIds": str(service.id),
-                "serviceCounts": "1",
-            },
-        )
+        params = {
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "officeIds": ",".join(offices_by_id),
+            "serviceIds": str(service.id),
+            "serviceCounts": "1",
+        }
+        if captcha_token:
+            params["captchaToken"] = captcha_token
+        payload = self._get_json("available-calendar/", params=params)
 
         slots: list[AppointmentSlot] = []
         for day in payload.get("availableDays", []):
@@ -222,6 +233,11 @@ def main() -> int:
     parser.add_argument("service", help="Full or partial appointment service name")
     parser.add_argument("--start", type=dt.date.fromisoformat, help="First date (YYYY-MM-DD)")
     parser.add_argument("--end", type=dt.date.fromisoformat, help="Last date (YYYY-MM-DD)")
+    parser.add_argument("--office", help="Limit the search to a matching office or address")
+    parser.add_argument(
+        "--captcha-token",
+        help="Token obtained by completing Munich's CAPTCHA in the official appointment interface",
+    )
     args = parser.parse_args()
 
     client = MunichAppointmentClient()
@@ -230,6 +246,12 @@ def main() -> int:
         if not services:
             print(f"No appointment service matched {args.service!r}.", file=sys.stderr)
             return 1
+        exact_services = [
+            service for service in services
+            if service.name.casefold() == args.service.strip().casefold()
+        ]
+        if exact_services:
+            services = exact_services
         if len(services) > 1:
             print("More than one service matched. Re-run with one of these exact names:")
             for service in services:
@@ -239,9 +261,46 @@ def main() -> int:
         service = services[0]
         start = args.start or dt.datetime.now(LOCAL_TIMEZONE).date()
         end = args.end or (start + dt.timedelta(days=180))
+        offices = client.offices_for_service(service.id)
+        office_ids = None
+        if args.office:
+            office_query = args.office.casefold()
+            matching_offices = []
+            for office in offices:
+                address = office.get("address") or {}
+                searchable = " ".join(
+                    str(value or "")
+                    for value in (
+                        office.get("name"),
+                        address.get("street"),
+                        address.get("house_number"),
+                        address.get("postal_code"),
+                        address.get("city"),
+                        (office.get("scope") or {}).get("shortName"),
+                    )
+                ).casefold()
+                if office_query in searchable:
+                    matching_offices.append(office)
+            if not matching_offices:
+                print(f"No office offering {service.name!r} matched {args.office!r}.", file=sys.stderr)
+                if offices:
+                    print("Offices offering this service:", file=sys.stderr)
+                    for office in offices:
+                        address = office.get("address") or {}
+                        print(
+                            f"  {office.get('name')}: {address.get('street')} "
+                            f"{address.get('house_number')}, {address.get('city')}",
+                            file=sys.stderr,
+                        )
+                return 1
+            office_ids = [str(office["id"]) for office in matching_offices]
         print(f"{service.name} ({service.id})")
+        if args.office:
+            print(f"Office filter: {args.office}")
         print(f"Checking {start.isoformat()} through {end.isoformat()}…")
-        slots = client.search(service, start, end)
+        slots = client.search(
+            service, start, end, office_ids=office_ids, captcha_token=args.captcha_token
+        )
     except (AppointmentApiError, ValueError, LookupError) as exc:
         print(f"Appointment search failed: {exc}", file=sys.stderr)
         return 1

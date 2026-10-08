@@ -5,3 +5,4 @@ log.txt
 jobs.sqlite
 /venv/
 chars.data
+.browserdeps

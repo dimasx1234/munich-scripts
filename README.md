@@ -62,6 +62,11 @@ The default search window is 180 days. It can be changed with `--start YYYY-MM-D
 If a search phrase matches multiple services, the command prints their exact names; run it again with the
 service name you want. Results are availability only; booking remains on Munich's official site.
 
+To check passport appointments at Belgradstraße, complete the CAPTCHA through Munich's official appointment
+interface and pass its token. The client does not solve or bypass the CAPTCHA:
+
+    python3 appointment_api.py "Reisepass" --office "Belgradstraße" --captcha-token "<token>"
+
 The client uses Python's standard HTTP library. Install `tzdata` on Windows so appointment times are converted
 using Munich's daylight-saving rules; Linux systems generally provide this time-zone database already.
 
